@@ -5,7 +5,6 @@ const state = {
     currentDate: new Date(),
     routines: [],
     records: {}, // { 'YYYY-MM-DD': { routineId: boolean } }
-    calendarId: null,
     editingRoutineId: null,
     scriptUrl: null, // Google Apps Script URL
     isSyncing: false
@@ -15,7 +14,6 @@ const state = {
 const STORAGE_KEYS = {
     ROUTINES: 'routine_tracker_routines',
     RECORDS: 'routine_tracker_records',
-    CALENDAR_ID: 'routine_tracker_calendar_id',
     SCRIPT_URL: 'routine_tracker_script_url'
 };
 
@@ -50,12 +48,10 @@ function loadFromStorage() {
     try {
         const routines = localStorage.getItem(STORAGE_KEYS.ROUTINES);
         const records = localStorage.getItem(STORAGE_KEYS.RECORDS);
-        const calendarId = localStorage.getItem(STORAGE_KEYS.CALENDAR_ID);
         const scriptUrl = localStorage.getItem(STORAGE_KEYS.SCRIPT_URL);
 
         if (routines) state.routines = JSON.parse(routines);
         if (records) state.records = JSON.parse(records);
-        if (calendarId) state.calendarId = calendarId;
         if (scriptUrl) state.scriptUrl = scriptUrl;
     } catch (e) {
         console.error('Failed to load from storage:', e);
@@ -70,13 +66,7 @@ function saveRecords() {
     localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(state.records));
 }
 
-function saveCalendarId() {
-    if (state.calendarId) {
-        localStorage.setItem(STORAGE_KEYS.CALENDAR_ID, state.calendarId);
-    } else {
-        localStorage.removeItem(STORAGE_KEYS.CALENDAR_ID);
-    }
-}
+
 
 function saveScriptUrl() {
     if (state.scriptUrl) {
@@ -448,51 +438,6 @@ function renderMonthLabels(months, totalWeeks) {
     }).join('');
 }
 
-function renderCalendar() {
-    const container = document.getElementById('calendarContainer');
-
-    if (!state.calendarId) {
-        container.innerHTML = `
-            <div class="calendar-placeholder" id="calendarPlaceholder">
-                <p>구글 캘린더를 연동하려면 설정 버튼을 클릭하세요</p>
-            </div>
-        `;
-        return;
-    }
-
-    // Handle different input formats
-    let calendarSrc = state.calendarId.trim();
-
-    // If it's already a full embed URL, extract the src parameter or use as-is
-    if (calendarSrc.includes('calendar.google.com/calendar/embed')) {
-        // Already a valid embed URL, use directly
-        if (calendarSrc.includes('src=')) {
-            // Extract just the calendar ID from the URL
-            const srcMatch = calendarSrc.match(/src=([^&]+)/);
-            if (srcMatch) {
-                calendarSrc = decodeURIComponent(srcMatch[1]);
-            }
-        }
-    }
-
-    // Build the embed URL
-    const calendarUrl = `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(calendarSrc)}&ctz=Asia/Seoul&mode=AGENDA&showTitle=0&showNav=1&showPrint=0&showTabs=0&showCalendars=0&bgcolor=%23121212`;
-
-    container.innerHTML = `
-        <iframe class="calendar-iframe" 
-                src="${calendarUrl}" 
-                frameborder="0" 
-                scrolling="no"
-                onload="this.style.opacity=1"
-                onerror="this.parentElement.innerHTML='<div class=\\'calendar-placeholder\\'><p>캘린더를 불러올 수 없습니다.<br>캘린더가 공개 설정인지 확인하세요.</p></div>'"
-                style="opacity: 0; transition: opacity 0.3s;">
-        </iframe>
-        <div class="calendar-help" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; text-align: center;">
-            400 오류 시: 캘린더 설정 → 액세스 권한 → "공개 사용 설정" 필요
-        </div>
-    `;
-}
-
 function updateDateDisplay() {
     const dateEl = document.getElementById('currentDate');
     dateEl.textContent = formatDisplayDate(state.currentDate);
@@ -588,25 +533,6 @@ function initEventListeners() {
         }
     });
 
-    // Calendar settings modal
-    document.getElementById('calendarSettingsBtn').addEventListener('click', () => {
-        document.getElementById('calendarIdInput').value = state.calendarId || '';
-        openModal('calendarSettingsModal');
-        setTimeout(() => document.getElementById('calendarIdInput').focus(), 100);
-    });
-
-    document.getElementById('cancelCalendarSettings').addEventListener('click', () => {
-        closeModal('calendarSettingsModal');
-    });
-
-    document.getElementById('saveCalendarSettings').addEventListener('click', () => {
-        const input = document.getElementById('calendarIdInput');
-        state.calendarId = input.value.trim() || null;
-        saveCalendarId();
-        renderCalendar();
-        closeModal('calendarSettingsModal');
-    });
-
     // Sync button - click to open settings, or sync if already configured
     document.getElementById('syncBtn').addEventListener('click', async () => {
         if (state.scriptUrl) {
@@ -698,7 +624,6 @@ async function init() {
     updateDateDisplay();
     renderRoutines();
     renderHeatmap();
-    renderCalendar();
     initEventListeners();
 
     // Initialize sync UI
