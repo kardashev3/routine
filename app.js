@@ -460,15 +460,36 @@ function renderCalendar() {
         return;
     }
 
-    // Create Google Calendar embed URL
-    const calendarUrl = `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(state.calendarId)}&ctz=Asia/Seoul&mode=AGENDA&showTitle=0&showNav=1&showPrint=0&showTabs=0&showCalendars=0`;
+    // Handle different input formats
+    let calendarSrc = state.calendarId.trim();
+
+    // If it's already a full embed URL, extract the src parameter or use as-is
+    if (calendarSrc.includes('calendar.google.com/calendar/embed')) {
+        // Already a valid embed URL, use directly
+        if (calendarSrc.includes('src=')) {
+            // Extract just the calendar ID from the URL
+            const srcMatch = calendarSrc.match(/src=([^&]+)/);
+            if (srcMatch) {
+                calendarSrc = decodeURIComponent(srcMatch[1]);
+            }
+        }
+    }
+
+    // Build the embed URL
+    const calendarUrl = `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(calendarSrc)}&ctz=Asia/Seoul&mode=AGENDA&showTitle=0&showNav=1&showPrint=0&showTabs=0&showCalendars=0&bgcolor=%23121212`;
 
     container.innerHTML = `
         <iframe class="calendar-iframe" 
                 src="${calendarUrl}" 
                 frameborder="0" 
-                scrolling="no">
+                scrolling="no"
+                onload="this.style.opacity=1"
+                onerror="this.parentElement.innerHTML='<div class=\\'calendar-placeholder\\'><p>캘린더를 불러올 수 없습니다.<br>캘린더가 공개 설정인지 확인하세요.</p></div>'"
+                style="opacity: 0; transition: opacity 0.3s;">
         </iframe>
+        <div class="calendar-help" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; text-align: center;">
+            400 오류 시: 캘린더 설정 → 액세스 권한 → "공개 사용 설정" 필요
+        </div>
     `;
 }
 
