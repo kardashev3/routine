@@ -130,6 +130,63 @@ body {
     text-align: center;
 }
 
+/* ===== Header Actions ===== */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+/* ===== Sync Button ===== */
+.sync-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: var(--transition-fast);
+}
+
+.sync-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.sync-btn.syncing .sync-icon {
+    animation: spin 1s linear infinite;
+}
+
+.sync-btn.synced {
+    border-color: var(--accent-success);
+}
+
+.sync-btn.error {
+    border-color: var(--accent-danger);
+}
+
+.sync-status {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.sync-status.connected {
+    color: var(--accent-success);
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 /* ===== Glass Card ===== */
 .glass-card {
     background: var(--glass-bg);

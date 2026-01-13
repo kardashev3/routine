@@ -6,14 +6,17 @@ const state = {
     routines: [],
     records: {}, // { 'YYYY-MM-DD': { routineId: boolean } }
     calendarId: null,
-    editingRoutineId: null
+    editingRoutineId: null,
+    scriptUrl: null, // Google Apps Script URL
+    isSyncing: false
 };
 
 // Storage Keys
 const STORAGE_KEYS = {
     ROUTINES: 'routine_tracker_routines',
     RECORDS: 'routine_tracker_records',
-    CALENDAR_ID: 'routine_tracker_calendar_id'
+    CALENDAR_ID: 'routine_tracker_calendar_id',
+    SCRIPT_URL: 'routine_tracker_script_url'
 };
 
 // ===== Utility Functions =====
@@ -48,10 +51,12 @@ function loadFromStorage() {
         const routines = localStorage.getItem(STORAGE_KEYS.ROUTINES);
         const records = localStorage.getItem(STORAGE_KEYS.RECORDS);
         const calendarId = localStorage.getItem(STORAGE_KEYS.CALENDAR_ID);
+        const scriptUrl = localStorage.getItem(STORAGE_KEYS.SCRIPT_URL);
 
         if (routines) state.routines = JSON.parse(routines);
         if (records) state.records = JSON.parse(records);
         if (calendarId) state.calendarId = calendarId;
+        if (scriptUrl) state.scriptUrl = scriptUrl;
     } catch (e) {
         console.error('Failed to load from storage:', e);
     }
@@ -73,6 +78,132 @@ function saveCalendarId() {
     }
 }
 
+function saveScriptUrl() {
+    if (state.scriptUrl) {
+        localStorage.setItem(STORAGE_KEYS.SCRIPT_URL, state.scriptUrl);
+    } else {
+        localStorage.removeItem(STORAGE_KEYS.SCRIPT_URL);
+    }
+}
+
+// ===== Google Sheets Sync Functions =====
+async function syncFromCloud() {
+    if (!state.scriptUrl || state.isSyncing) return false;
+
+    state.isSyncing = true;
+    updateSyncUI('syncing');
+
+    try {
+        const response = await fetch(state.scriptUrl);
+        const data = await response.json();
+
+        if (data.success) {
+            // Merge cloud data with local
+            if (data.routines && data.routines.length > 0) {
+                state.routines = data.routines;
+                saveRoutines();
+            }
+            if (data.records && Object.keys(data.records).length > 0) {
+                // Merge records (cloud takes precedence)
+                state.records = { ...state.records, ...data.records };
+                saveRecords();
+            }
+
+            updateSyncUI('synced');
+            return true;
+        } else {
+            console.error('Sync error:', data.error);
+            updateSyncUI('error');
+            return false;
+        }
+    } catch (error) {
+        console.error('Sync failed:', error);
+        updateSyncUI('error');
+        return false;
+    } finally {
+        state.isSyncing = false;
+    }
+}
+
+async function syncToCloud() {
+    if (!state.scriptUrl || state.isSyncing) return false;
+
+    state.isSyncing = true;
+    updateSyncUI('syncing');
+
+    try {
+        const response = await fetch(state.scriptUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'text/plain', // Apps Script requires this
+            },
+            body: JSON.stringify({
+                routines: state.routines,
+                records: state.records
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            updateSyncUI('synced');
+            return true;
+        } else {
+            console.error('Sync error:', data.error);
+            updateSyncUI('error');
+            return false;
+        }
+    } catch (error) {
+        console.error('Sync failed:', error);
+        updateSyncUI('error');
+        return false;
+    } finally {
+        state.isSyncing = false;
+    }
+}
+
+function updateSyncUI(status) {
+    const syncBtn = document.getElementById('syncBtn');
+    const syncStatus = document.getElementById('syncStatus');
+
+    syncBtn.classList.remove('syncing', 'synced', 'error');
+
+    switch (status) {
+        case 'syncing':
+            syncBtn.classList.add('syncing');
+            syncStatus.textContent = '동기화 중...';
+            break;
+        case 'synced':
+            syncBtn.classList.add('synced');
+            syncStatus.textContent = '연결됨';
+            syncStatus.classList.add('connected');
+            break;
+        case 'error':
+            syncBtn.classList.add('error');
+            syncStatus.textContent = '오류';
+            syncStatus.classList.remove('connected');
+            break;
+        case 'disconnected':
+        default:
+            syncStatus.textContent = '설정 필요';
+            syncStatus.classList.remove('connected');
+            break;
+    }
+}
+
+// Debounced sync to avoid too many requests
+let syncTimeout = null;
+function debouncedSyncToCloud() {
+    if (!state.scriptUrl) return;
+
+    if (syncTimeout) {
+        clearTimeout(syncTimeout);
+    }
+    syncTimeout = setTimeout(() => {
+        syncToCloud();
+    }, 2000); // Wait 2 seconds after last change
+}
+
 // ===== Routine Functions =====
 function addRoutine(name) {
     const routine = {
@@ -83,6 +214,7 @@ function addRoutine(name) {
     state.routines.push(routine);
     saveRoutines();
     renderRoutines();
+    debouncedSyncToCloud();
 }
 
 function updateRoutine(id, name) {
@@ -91,6 +223,7 @@ function updateRoutine(id, name) {
         routine.name = name.trim();
         saveRoutines();
         renderRoutines();
+        debouncedSyncToCloud();
     }
 }
 
@@ -106,6 +239,7 @@ function deleteRoutine(id) {
     saveRecords();
     renderRoutines();
     renderHeatmap();
+    debouncedSyncToCloud();
 }
 
 function toggleRoutineCheck(routineId, checked) {
@@ -119,6 +253,7 @@ function toggleRoutineCheck(routineId, checked) {
     saveRecords();
     updateProgress();
     renderHeatmap();
+    debouncedSyncToCloud();
 }
 
 function getRoutineStatus(routineId, date) {
@@ -213,14 +348,15 @@ function renderHeatmap() {
     const grid = document.getElementById('heatmapGrid');
     const monthsContainer = document.getElementById('heatmapMonths');
 
-    // Calculate 365 days ago
+    // Start from January 1, 2026
     const today = new Date();
-    const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() - 364);
+    const startDate = new Date(2026, 0, 1); // January 1, 2026
 
-    // Adjust to start from Sunday
+    // Adjust to start from Sunday (if Jan 1 is not Sunday)
     const dayOfWeek = startDate.getDay();
-    startDate.setDate(startDate.getDate() - dayOfWeek);
+    if (dayOfWeek !== 0) {
+        startDate.setDate(startDate.getDate() - dayOfWeek);
+    }
 
     // Generate cells
     const cells = [];
@@ -450,6 +586,70 @@ function initEventListeners() {
         closeModal('calendarSettingsModal');
     });
 
+    // Sync button - click to open settings, or sync if already configured
+    document.getElementById('syncBtn').addEventListener('click', async () => {
+        if (state.scriptUrl) {
+            // If already configured, sync from cloud
+            const synced = await syncFromCloud();
+            if (synced) {
+                renderRoutines();
+                renderHeatmap();
+            }
+        } else {
+            // Open sync settings modal
+            document.getElementById('scriptUrlInput').value = state.scriptUrl || '';
+            openModal('syncSettingsModal');
+        }
+    });
+
+    // Sync button - right click to open settings
+    document.getElementById('syncBtn').addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        document.getElementById('scriptUrlInput').value = state.scriptUrl || '';
+        openModal('syncSettingsModal');
+    });
+
+    // Sync settings modal
+    document.getElementById('cancelSyncSettings').addEventListener('click', () => {
+        closeModal('syncSettingsModal');
+    });
+
+    document.getElementById('saveSyncSettings').addEventListener('click', async () => {
+        const input = document.getElementById('scriptUrlInput');
+        const url = input.value.trim();
+
+        if (url && !url.startsWith('https://script.google.com/')) {
+            document.getElementById('syncInfo').innerHTML =
+                '<span style="color: var(--accent-danger);">올바른 Google Apps Script URL을 입력하세요</span>';
+            return;
+        }
+
+        state.scriptUrl = url || null;
+        saveScriptUrl();
+        closeModal('syncSettingsModal');
+
+        if (state.scriptUrl) {
+            // Try to sync
+            const synced = await syncFromCloud();
+            if (synced) {
+                renderRoutines();
+                renderHeatmap();
+            }
+        } else {
+            updateSyncUI('disconnected');
+        }
+    });
+
+    // Sync help link
+    document.getElementById('syncHelpLink').addEventListener('click', (e) => {
+        e.preventDefault();
+        openModal('syncHelpModal');
+    });
+
+    document.getElementById('closeSyncHelp').addEventListener('click', () => {
+        closeModal('syncHelpModal');
+    });
+
     // Close modals on overlay click
     document.querySelectorAll('.modal-overlay').forEach(overlay => {
         overlay.addEventListener('click', (e) => {
@@ -472,13 +672,26 @@ function initEventListeners() {
 }
 
 // ===== Initialize App =====
-function init() {
+async function init() {
     loadFromStorage();
     updateDateDisplay();
     renderRoutines();
     renderHeatmap();
     renderCalendar();
     initEventListeners();
+
+    // Initialize sync UI
+    if (state.scriptUrl) {
+        updateSyncUI('synced');
+        // Sync from cloud on startup
+        const synced = await syncFromCloud();
+        if (synced) {
+            renderRoutines();
+            renderHeatmap();
+        }
+    } else {
+        updateSyncUI('disconnected');
+    }
 
     // Add sample routines if empty (first time user)
     if (state.routines.length === 0) {
